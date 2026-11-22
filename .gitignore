@@ -1,0 +1,9 @@
+.DS_Store
+*.log
+.venv/
+__pycache__/
+.ruff_cache/
+.cache/
+data/osm-cache/
+deployment/runtime/
+.mypy_cache/

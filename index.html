@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="light">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="Cache-Control" content="no-store" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Cajuru · Central de emergências</title>
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css"
+        />
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        />
+        <style>
+            html {
+                overflow-y: auto;
+            }
+            body {
+                height: 100dvh;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }
+            #error {
+                display: none;
+                flex-shrink: 0;
+            }
+            main {
+                flex: 1;
+                min-height: 0;
+                display: grid;
+                grid-template-columns: 320px minmax(0, 1fr) 290px;
+                gap: 12px;
+                padding: 16px;
+            }
+            .map-wrap {
+                position: relative;
+                min-height: 0;
+                overflow: hidden;
+            }
+            #map {
+                width: 100%;
+                height: 100%;
+            }
+            .map-label {
+                position: absolute;
+                top: 14px;
+                left: 55px;
+                z-index: 500;
+            }
+            .legend {
+                position: absolute;
+                bottom: 25px;
+                left: 14px;
+                right: 14px;
+                z-index: 500;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+                width: fit-content;
+                max-width: calc(100% - 28px);
+            }
+            .legend svg,
+            .vehicle-marker svg,
+            .hospital-marker svg,
+            .incident-marker svg {
+                fill: none;
+                stroke: currentColor;
+                stroke-width: 1.8;
+                stroke-linecap: round;
+                stroke-linejoin: round;
+            }
+            .legend svg {
+                width: 18px;
+                height: 18px;
+            }
+            .left-column {
+                min-height: 0;
+                display: grid;
+                grid-template-rows: repeat(2, minmax(0, 1fr));
+                gap: 12px;
+            }
+            .dashboard-panel {
+                min-height: 0;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }
+            .panel-content {
+                flex: 1;
+                min-height: 0;
+                overflow-y: auto;
+                overscroll-behavior: contain;
+                scrollbar-gutter: stable;
+            }
+            .vehicle-marker,
+            .hospital-marker,
+            .incident-marker {
+                display: grid;
+                place-items: center;
+                background: var(--bulma-scheme-main);
+                border: 2px solid currentColor;
+                box-shadow: var(--bulma-box-shadow);
+            }
+            .hospital-marker {
+                color: var(--bulma-link);
+                border-radius: var(--bulma-radius);
+            }
+            .vehicle-marker {
+                border-radius: var(--bulma-radius);
+            }
+            .incident-marker {
+                border-radius: 50%;
+            }
+            .vehicle-marker svg,
+            .hospital-marker svg,
+            .incident-marker svg {
+                width: 22px;
+                height: 22px;
+            }
+            @media (max-width: 1100px) {
+                main {
+                    grid-template-columns: 260px minmax(0, 1fr) 230px;
+                    gap: 10px;
+                    padding: 12px;
+                }
+                .legend {
+                    gap: 8px;
+                }
+            }
+            @media (max-width: 800px) {
+                body {
+                    height: auto;
+                    min-height: 100dvh;
+                    overflow: auto;
+                }
+                main {
+                    flex: none;
+                    grid-template-columns: minmax(0, 1fr);
+                }
+                .map-wrap {
+                    grid-row: 1;
+                    height: 55dvh;
+                    min-height: 350px;
+                }
+                .left-column {
+                    grid-row: 2;
+                    height: max(600px, 85dvh);
+                }
+                .timeline {
+                    grid-row: 3;
+                    height: max(360px, 65dvh);
+                }
+                .legend svg {
+                    width: 16px;
+                    height: 16px;
+                }
+            }
+        </style>
+    </head>
+    <body class="has-background-light">
+        <svg width="0" height="0" aria-hidden="true" style="position: absolute">
+            <defs>
+                <symbol id="hospital-icon" viewBox="0 0 24 24">
+                    <path d="M4 21V5h16v16M9 2h6M9 10h6M12 7v6M9 21v-5h6v5" />
+                </symbol>
+                <symbol id="vehicle-icon" viewBox="0 0 24 24">
+                    <path
+                        d="M3 7h11v11H3zM14 11h4l3 4v3h-7M6 10h5M8.5 7.5v5M17 12v3h4"
+                    />
+                    <circle cx="6.5" cy="18" r="2" fill="white" />
+                    <circle cx="17.5" cy="18" r="2" fill="white" />
+                </symbol>
+                <symbol id="incident-icon" viewBox="0 0 24 24">
+                    <path
+                        d="m10.3 4.5-7.5 13A2 2 0 0 0 4.5 20h15a2 2 0 0 0 1.7-2.5l-7.5-13a2 2 0 0 0-3.4 0Z"
+                    />
+                    <path d="M12 9v4M12 16v.5" />
+                </symbol>
+            </defs>
+        </svg>
+        <div
+            id="error"
+            class="notification is-danger is-light mx-4 mt-3 mb-0"
+            role="alert"
+        ></div>
+        <main>
+            <aside class="left-column" aria-label="Ocorrências e frota">
+                <section
+                    class="card dashboard-panel mb-0"
+                    aria-labelledby="incidents-heading"
+                >
+                    <div class="card-header is-flex-shrink-0">
+                        <h2
+                            id="incidents-heading"
+                            class="card-header-title is-size-7 is-justify-content-space-between"
+                        >
+                            Ocorrências
+                            <span
+                                id="incident-count"
+                                class="has-text-grey has-text-weight-normal"
+                                >0 abertas</span
+                            >
+                        </h2>
+                    </div>
+                    <div class="p-3 is-flex-shrink-0">
+                        <button
+                            id="add-incident"
+                            class="button is-link is-small is-fullwidth"
+                        >
+                            + Ocorrência aleatória
+                        </button>
+                    </div>
+                    <div
+                        id="incidents"
+                        class="card-content panel-content p-3"
+                        tabindex="0"
+                        role="region"
+                        aria-labelledby="incidents-heading"
+                    >
+                        <div class="has-text-grey is-size-7 py-2">
+                            Crie uma ocorrência aleatória para começar.<br />Os
+                            veículos são enviados automaticamente.
+                        </div>
+                    </div>
+                </section>
+                <section
+                    class="card dashboard-panel mb-0"
+                    aria-labelledby="fleet-heading"
+                >
+                    <div class="card-header is-flex-shrink-0">
+                        <h2
+                            id="fleet-heading"
+                            class="card-header-title is-size-7 is-justify-content-space-between"
+                        >
+                            Frota
+                            <span
+                                id="fleet-count"
+                                class="has-text-grey has-text-weight-normal"
+                                >0 veículos</span
+                            >
+                        </h2>
+                    </div>
+                    <div
+                        id="fleet"
+                        class="card-content panel-content p-3"
+                        tabindex="0"
+                        role="region"
+                        aria-labelledby="fleet-heading"
+                    ></div>
+                </section>
+            </aside>
+            <div class="map-wrap card mb-0">
+                <div
+                    id="map"
+                    aria-label="Mapa de atendimento na região da PUCPR e do Hospital Cajuru"
+                ></div>
+                <div class="map-label box py-2 px-3 mb-0 is-size-7">
+                    Prado Velho → Cristo Rei
+                </div>
+                <div class="legend box p-2 mb-0 is-size-7">
+                    <span class="icon-text">
+                        <span class="icon has-text-success" aria-hidden="true"
+                            ><svg viewBox="0 0 24 24">
+                                <use href="#vehicle-icon" /></svg
+                        ></span>
+                        <span>Disponível / em cobertura</span>
+                    </span>
+                    <span class="icon-text">
+                        <span class="icon has-text-link" aria-hidden="true"
+                            ><svg viewBox="0 0 24 24">
+                                <use href="#vehicle-icon" /></svg
+                        ></span>
+                        <span>Em atendimento</span>
+                    </span>
+                    <span class="icon-text">
+                        <span class="icon has-text-grey" aria-hidden="true"
+                            ><svg viewBox="0 0 24 24">
+                                <use href="#vehicle-icon" /></svg
+                        ></span>
+                        <span>Desconectada</span>
+                    </span>
+                    <span class="icon-text">
+                        <span class="icon has-text-danger" aria-hidden="true"
+                            ><svg viewBox="0 0 24 24">
+                                <use href="#incident-icon" /></svg
+                        ></span>
+                        <span>Aguardando veículo</span>
+                    </span>
+                </div>
+            </div>
+            <section
+                class="card dashboard-panel timeline mb-0"
+                aria-labelledby="activity-heading"
+            >
+                <div class="card-header is-flex-shrink-0 is-align-items-center">
+                    <h2
+                        id="activity-heading"
+                        class="card-header-title is-size-7"
+                    >
+                        Linha do tempo
+                    </h2>
+                    <button
+                        id="clear-events"
+                        type="button"
+                        class="button is-small is-light mr-3"
+                        aria-label="Limpar linha do tempo"
+                    >
+                        Limpar
+                    </button>
+                </div>
+                <div
+                    id="events"
+                    class="card-content panel-content p-3"
+                    tabindex="0"
+                    role="region"
+                    aria-labelledby="activity-heading"
+                ></div>
+            </section>
+        </main>
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <script>
+            // Keep keyboard navigation available while the embedded dashboard has focus.
+            if (window.parent !== window && document.referrer) {
+                document.addEventListener("keydown", (event) => {
+                    if (
+                        event.ctrlKey ||
+                        event.metaKey ||
+                        event.altKey ||
+                        event.target.closest(
+                            "input, textarea, select, [contenteditable=true]",
+                        ) ||
+                        (event.key === " " && event.target.closest("button, a"))
+                    )
+                        return;
+                    if (
+                        [
+                            "ArrowLeft",
+                            "ArrowRight",
+                            "PageUp",
+                            "PageDown",
+                            "Home",
+                            "End",
+                            " ",
+                            "f",
+                            "F",
+                        ].includes(event.key)
+                    ) {
+                        event.preventDefault();
+                        window.parent.postMessage(
+                            { type: "cajuru-presentation-key", key: event.key },
+                            new URL(document.referrer).origin,
+                        );
+                    }
+                });
+            }
+
+            const hospitalIcon = L.divIcon({
+                className: "hospital-marker",
+                html: '<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#hospital-icon"/></svg>',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+                tooltipAnchor: [0, -18],
+            });
+            const vehicleIcon = L.divIcon({
+                className: "vehicle-marker",
+                html: '<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#vehicle-icon"/></svg>',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+                tooltipAnchor: [0, -18],
+            });
+            const incidentIcon = L.divIcon({
+                className: "incident-marker",
+                html: '<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#incident-icon"/></svg>',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
+                tooltipAnchor: [0, -18],
+            });
+            const map = L.map("map", {
+                zoomControl: false,
+                minZoom: 14,
+                maxBoundsViscosity: 1,
+            }).setView([-25.44, -49.247], 14);
+            L.control
+                .zoom({ zoomInTitle: "Aproximar", zoomOutTitle: "Afastar" })
+                .addTo(map);
+            L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                maxZoom: 19,
+                attribution:
+                    '&copy; Colaboradores do <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+            }).addTo(map);
+            const vehicleMarkers = new Map(),
+                incidentMarkers = new Map(),
+                routeLines = new Map();
+            let initialized = false;
+            const labels = {
+                available: "Disponível",
+                repositioning: "Reposicionando",
+                responding: "A caminho",
+                on_scene: "No local",
+                transporting: "A caminho do hospital",
+                waiting: "Aguardando veículo",
+                assigned: "Veículo a caminho",
+                at_hospital: "Entrega no hospital",
+                completed: "Concluída",
+                offline: "Desconectada",
+                offered: "Oferta recebida",
+                connecting: "Registrando",
+                failed: "Falha na rota",
+            };
+            const formatTime = (seconds) => {
+                const s = Math.max(0, Math.round(seconds));
+                return `${Math.floor(s / 60)
+                    .toString()
+                    .padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
+            };
+            function formatEvent(message) {
+                const templates = [
+                    [
+                        /^(AMB-\d+) registered at .+$/,
+                        (_, vehicle) => `${vehicle} registrada via MQTT`,
+                    ],
+                    [
+                        /^(AMB-\d+) selected for (INC-\d+): (.+) m by road$/,
+                        (_, vehicle, incident, distance) =>
+                            `${vehicle} selecionada para ${incident} · ${distance} m por vias`,
+                    ],
+                    [
+                        /^assignment-.+ confirmed for (AMB-\d+); TTL (.+)s$/,
+                        (_, vehicle, ttl) =>
+                            `${vehicle} confirmou a missão · TTL ${ttl} s`,
+                    ],
+                    [
+                        /^(AMB-\d+) offline;.*$/,
+                        (_, vehicle) =>
+                            `${vehicle} desconectada · aguardando TTL`,
+                    ],
+                    [
+                        /^(AMB-\d+) released from (INC-\d+): (.+)$/,
+                        (_, vehicle, incident) =>
+                            `${incident} liberada de ${vehicle} · reatribuição`,
+                    ],
+                    [
+                        /^(AMB-\d+) stopped reporting$/,
+                        (_, vehicle) => `${vehicle} parou de enviar telemetria`,
+                    ],
+                    [
+                        /^(INC-\d+) completed by (AMB-\d+)$/,
+                        (_, incident, vehicle) =>
+                            `${incident} concluída por ${vehicle}`,
+                    ],
+                    [
+                        /^Central subscribed to .+$/,
+                        () => "Central conectada ao broker MQTT",
+                    ],
+                    [
+                        /^Central MQTT connection failed:.+$/,
+                        () => "Conexão MQTT perdida · reconectando",
+                    ],
+                    [
+                        /^Invalid vehicle message:.+$/,
+                        () => "Mensagem inválida rejeitada",
+                    ],
+                    [
+                        /^(AMB-\d+) joined the fleet$/,
+                        (_, vehicle) => `${vehicle} entrou na frota`,
+                    ],
+                    [
+                        /^(AMB-\d+) repositioning to improve coverage$/,
+                        (_, vehicle) =>
+                            `${vehicle} reposicionando para ampliar a cobertura`,
+                    ],
+                    [
+                        /^(AMB-\d+) reached standby location$/,
+                        (_, vehicle) =>
+                            `${vehicle} aguardando no ponto de cobertura`,
+                    ],
+                    [
+                        /^(INC-\d+) created$/,
+                        (_, incident) => `${incident} criada`,
+                    ],
+                    [
+                        /^(AMB-\d+) dispatched to (INC-\d+)$/,
+                        (_, vehicle, incident) =>
+                            `${vehicle} enviada para ${incident}`,
+                    ],
+                    [
+                        /^(AMB-\d+) arrived at (INC-\d+)$/,
+                        (_, vehicle, incident) =>
+                            `${vehicle} chegou ao local de ${incident}`,
+                    ],
+                    [
+                        /^(AMB-\d+) reached Hospital Cajuru with (INC-\d+)$/,
+                        (_, vehicle, incident) =>
+                            `${vehicle} chegou ao Hospital Cajuru · ${incident}`,
+                    ],
+                    [
+                        /^(AMB-\d+) transporting (INC-\d+) to Cajuru$/,
+                        (_, vehicle, incident) =>
+                            `${vehicle} transportando ao Cajuru · ${incident}`,
+                    ],
+                    [
+                        /^(INC-\d+) completed · (AMB-\d+) available$/,
+                        (_, incident, vehicle) =>
+                            `${incident} concluída · ${vehicle} disponível`,
+                    ],
+                ];
+                for (const [pattern, translate] of templates) {
+                    const match = message.match(pattern);
+                    if (match) return translate(...match);
+                }
+                return "Atualização da operação";
+            }
+            function updatePanel(id, html) {
+                const panel = document.getElementById(id),
+                    scrollTop = panel.scrollTop;
+                panel.innerHTML = html;
+                panel.scrollTop = scrollTop;
+            }
+            function showError(message) {
+                const errorPanel = document.getElementById("error");
+                errorPanel.textContent = message;
+                errorPanel.style.display = message ? "block" : "none";
+            }
+            async function request(url, options = {}) {
+                const response = await fetch(url, {
+                    ...options,
+                    signal: AbortSignal.timeout(5000),
+                    cache: "no-store",
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    const errors = {
+                        "Demo limit: 100 active incidents":
+                            "Limite da demonstração: 100 ocorrências abertas.",
+                    };
+                    throw Error(
+                        errors[data.detail] ||
+                            `Falha na solicitação (${response.status}).`,
+                    );
+                }
+                return response.json();
+            }
+            function render(data) {
+                if (!initialized) {
+                    const bounds = L.latLngBounds(data.bounds);
+                    map.fitBounds(bounds, { padding: [12, 12] });
+                    map.setMinZoom(map.getZoom());
+                    map.setMaxBounds(bounds.pad(0.1));
+                    const hospital = data.landmarks.hospital;
+                    L.marker(hospital.position, {
+                        title: hospital.name,
+                        alt: hospital.name,
+                        icon: hospitalIcon,
+                    })
+                        .addTo(map)
+                        .bindTooltip(hospital.name, { direction: "top" });
+                    initialized = true;
+                }
+                const incidentById = new Map(
+                    data.incidents.map((incident) => [incident.id, incident]),
+                );
+                const vehicleLabel = (vehicle) => {
+                    if (vehicle.state === "offline") return labels.offline;
+                    const incident = incidentById.get(vehicle.incident_id);
+                    return labels[
+                        incident &&
+                        ["on_scene", "at_hospital"].includes(incident.state)
+                            ? incident.state
+                            : vehicle.state
+                    ];
+                };
+                for (const vehicle of data.vehicles) {
+                    const color =
+                        vehicle.state === "offline"
+                            ? "#737373"
+                            : ["available", "repositioning"].includes(
+                                    vehicle.state,
+                                )
+                              ? "#178568"
+                              : "#125cc4";
+                    let marker = vehicleMarkers.get(vehicle.id);
+                    if (!marker) {
+                        marker = L.marker(vehicle.position, {
+                            icon: vehicleIcon,
+                            alt: `Ambulância ${vehicle.id}`,
+                            zIndexOffset: 200,
+                        })
+                            .addTo(map)
+                            .bindTooltip(vehicle.id, { direction: "top" });
+                        vehicleMarkers.set(vehicle.id, marker);
+                    }
+                    marker.setLatLng(vehicle.position);
+                    marker.getElement().style.color = color;
+                    marker
+                        .getElement()
+                        .setAttribute(
+                            "aria-label",
+                            `Ambulância ${vehicle.id} · ${vehicleLabel(vehicle)}`,
+                        );
+                    marker.setTooltipContent(
+                        `${vehicle.id} · ${vehicleLabel(vehicle)}`,
+                    );
+                    let route = routeLines.get(vehicle.id);
+                    if (vehicle.route.length) {
+                        if (!route) {
+                            route = L.polyline(vehicle.route, {
+                                weight: 4,
+                                opacity: 0.55,
+                            }).addTo(map);
+                            routeLines.set(vehicle.id, route);
+                        } else route.setLatLngs(vehicle.route);
+                        route.setStyle({
+                            color,
+                            dashArray:
+                                vehicle.state === "offline"
+                                    ? "4 6"
+                                    : vehicle.state === "repositioning"
+                                      ? "6 6"
+                                      : null,
+                        });
+                    } else if (route) {
+                        map.removeLayer(route);
+                        routeLines.delete(vehicle.id);
+                    }
+                }
+                for (const incident of data.incidents) {
+                    let marker = incidentMarkers.get(incident.id);
+                    if (
+                        !["waiting", "assigned", "on_scene"].includes(
+                            incident.state,
+                        )
+                    ) {
+                        if (marker) {
+                            map.removeLayer(marker);
+                            incidentMarkers.delete(incident.id);
+                        }
+                        continue;
+                    }
+                    if (!marker) {
+                        marker = L.marker(incident.position, {
+                            icon: incidentIcon,
+                            alt: `Ocorrência ${incident.id}`,
+                        })
+                            .addTo(map)
+                            .bindTooltip(incident.id);
+                        incidentMarkers.set(incident.id, marker);
+                    }
+                    marker.getElement().style.color = "#c43b43";
+                    marker
+                        .getElement()
+                        .setAttribute(
+                            "aria-label",
+                            `Ocorrência ${incident.id}`,
+                        );
+                    marker.setTooltipContent(
+                        `${incident.id} · ${labels[incident.state]}`,
+                    );
+                }
+                const open = data.incidents.filter(
+                    (i) => i.state !== "completed",
+                );
+                document.getElementById("incident-count").textContent =
+                    `${open.length} ${open.length === 1 ? "aberta" : "abertas"}`;
+                updatePanel(
+                    "incidents",
+                    open.length
+                        ? open
+                              .map((i) => {
+                                  const eta =
+                                      i.eta_seconds === null
+                                          ? ""
+                                          : ` · Chegada em ${formatTime(i.eta_seconds)}`;
+                                  return `<article class="incident box p-3 mb-3"><p class="is-size-7 has-text-weight-semibold mb-2">${i.id}</p><p class="is-size-7 has-text-grey">${labels[i.state]}${i.vehicle_id ? " · " + i.vehicle_id : ""}${eta}</p></article>`;
+                              })
+                              .join("")
+                        : '<div class="has-text-grey is-size-7 py-2">Nenhuma ocorrência aberta.<br>Crie uma ocorrência aleatória para enviar um veículo.</div>',
+                );
+                document.getElementById("fleet-count").textContent =
+                    `${data.vehicles.length} ${data.vehicles.length === 1 ? "veículo" : "veículos"}`;
+                updatePanel(
+                    "fleet",
+                    data.vehicles
+                        .map(
+                            (v) =>
+                                `<article class="vehicle media m-0 py-3"><div class="media-left"><span class="is-size-7 has-text-weight-semibold">${v.id}</span></div><div class="media-content has-text-right is-size-7 ${["available", "repositioning"].includes(v.state) ? "has-text-success" : "has-text-grey"}"><span class="state ${v.state}">${vehicleLabel(v)}${v.incident_id ? " · " + v.incident_id : ""}</span></div></article>`,
+                        )
+                        .join(""),
+                );
+                updatePanel(
+                    "events",
+                    data.events
+                        .map(
+                            (e) =>
+                                `<article class="event media m-0 py-3"><div class="media-left mr-3"><time class="is-family-monospace is-size-7 has-text-grey">${formatTime(e.time)}</time></div><div class="media-content is-size-7"><p>${formatEvent(e.message)}</p></div></article>`,
+                        )
+                        .join("") ||
+                        '<p class="has-text-grey is-size-7">Nenhum evento registrado.</p>',
+                );
+            }
+            // Serialize refreshes, including button refreshes, so older snapshots cannot overwrite newer ones.
+            let refreshing = null;
+            let snapshotVersion = 0;
+            async function refresh() {
+                if (refreshing) return refreshing;
+                refreshing = (async () => {
+                    try {
+                        const version = snapshotVersion;
+                        const data = await request("/api/state");
+                        if (version !== snapshotVersion) return;
+                        render(data);
+                        showError(
+                            data.broker_connected
+                                ? ""
+                                : "Central sem conexão com o broker MQTT. Tentando reconectar…",
+                        );
+                    } catch (error) {
+                        showError(
+                            "Não foi possível atualizar o painel. Verifique a conexão. Tentando novamente…",
+                        );
+                    } finally {
+                        refreshing = null;
+                    }
+                })();
+                return refreshing;
+            }
+            const clearEventsButton = document.getElementById("clear-events");
+            clearEventsButton.addEventListener("click", async () => {
+                clearEventsButton.disabled = true;
+                try {
+                    await request("/api/events", { method: "DELETE" });
+                    snapshotVersion += 1;
+                    updatePanel(
+                        "events",
+                        '<p class="has-text-grey is-size-7">Nenhum evento registrado.</p>',
+                    );
+                    document.getElementById("events").scrollTop = 0;
+                    await refreshing;
+                    await refresh();
+                } catch (error) {
+                    showError(
+                        "Não foi possível limpar a linha do tempo. Tente novamente.",
+                    );
+                } finally {
+                    clearEventsButton.disabled = false;
+                }
+            });
+            const addIncidentButton = document.getElementById("add-incident");
+            addIncidentButton.addEventListener("click", async () => {
+                addIncidentButton.disabled = true;
+                try {
+                    await request("/api/incidents", { method: "POST" });
+                    await refresh();
+                } catch (error) {
+                    showError(
+                        error.name === "Error"
+                            ? error.message
+                            : "Não foi possível concluir a ação. Tente novamente.",
+                    );
+                } finally {
+                    addIncidentButton.disabled = false;
+                }
+            });
+            async function poll() {
+                await refresh();
+                setTimeout(poll, 1000);
+            }
+            poll();
+        </script>
+    </body>
+</html>

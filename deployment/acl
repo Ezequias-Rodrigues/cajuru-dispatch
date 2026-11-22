@@ -1,0 +1,18 @@
+user central
+topic read cajuru/central/inbox/+
+topic write cajuru/vehicles/+/inbox
+
+user AMB-01
+topic write cajuru/central/inbox/AMB-01
+topic read cajuru/vehicles/AMB-01/inbox
+
+user AMB-02
+topic write cajuru/central/inbox/AMB-02
+topic read cajuru/vehicles/AMB-02/inbox
+
+user AMB-03
+topic write cajuru/central/inbox/AMB-03
+topic read cajuru/vehicles/AMB-03/inbox
+
+user observer
+topic read cajuru/#

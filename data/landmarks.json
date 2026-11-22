@@ -1,0 +1,10 @@
+{
+  "hospital": {
+    "name": "Hospital Universitário Cajuru",
+    "position": [-25.4359282, -49.2454083]
+  },
+  "campus": {
+    "name": "PUCPR · Câmpus Curitiba",
+    "position": [-25.4523677, -49.2513212]
+  }
+}
